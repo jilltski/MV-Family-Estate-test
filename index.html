@@ -158,7 +158,11 @@ a { color: inherit; text-decoration: none; }
 /* Frame aspect is PNG aspect PLUS a bottom gutter so labels can sit clearly
    below the painted image without overlapping hedges/bushes. Image and
    hotspots lock to the TOP of the frame (PNG aspect); labels live beneath. */
-.estate-frame { position: relative; width: 100%; max-width: 1050px; aspect-ratio: 1536 / 1100; margin: 0 auto 80px; overflow: visible; }
+/* Estate scales as a fixed 1050px design (same technique as the house) so its
+   absolutely-positioned labels never overlap or overflow at narrow widths. */
+.estate-section { display: flex; flex-direction: column; align-items: center; width: 100%; max-width: 100%; overflow: hidden; }
+.estate-stage { width: 1050px; flex: 0 0 auto; transform-origin: top center; }
+.estate-frame { position: relative; width: 100%; aspect-ratio: 1536 / 1100; margin: 0 auto 80px; overflow: visible; }
 .estate-bg { position: absolute; top: 0; left: 0; width: 100%; aspect-ratio: 1536 / 1024; object-fit: contain; pointer-events: none; user-select: none; }
 .estate-hotspots { position: absolute; top: 0; left: 0; width: 100%; aspect-ratio: 1536 / 1024; }
 
@@ -252,27 +256,15 @@ body.label-drag-mode .estate-hotspot-key { display: block; position: absolute; t
 .info-list li::before { content: ''; position: absolute; left: 0; top: 9px; width: 8px; height: 1.5px; background: var(--gold); }
 
 /* ═══ RESPONSIVE ═══ */
-@media (max-width: 900px) {
-  .level-strip { flex: 0 0 18px; font-size: 7px; letter-spacing: 0.14em; }
-  .room-name { font-size: 10.5px; }
-  .room-name.sm { font-size: 9.5px; }
-  .room-category { font-size: 6.5px; letter-spacing: 0.1em; }
-  .room-subname { font-size: 8px; }
-  .gen-badge { font-size: 6.5px; min-width: 14px; height: 12px; padding: 0 3px; }
-  .foundation-text { font-size: 16px; }
-  .foundation-label { font-size: 9px; }
-}
+/* NOTE: The House and Estate are fixed-width designs (1500px / 1050px) that are
+   scaled to fit the viewport by the scale-to-fit script at the end of <body>.
+   Their INTERNALS must NOT be restyled by viewport breakpoints — doing so
+   double-shrinks the room/label text (once by the media query, again by the
+   transform) until it's illegible. So these breakpoints only touch page chrome
+   (header, page title) and the detail panel — never .room / .level / .gen-badge
+   / .estate-label, which the transform handles. */
 @media (max-width: 780px) {
   .page { padding: 24px 12px 48px; }
-  .room { padding: 4px 6px; }
-  .room-name { font-size: 9px; }
-  .room-name.sm { font-size: 8px; }
-  .room-category { font-size: 5.5px; letter-spacing: 0.1em; }
-  .room-subname { display: none; }
-  .gen-badge { font-size: 5.5px; min-width: 14px; height: 12px; padding: 0 3px; letter-spacing: 0; }
-  .level-strip { width: 14px; font-size: 6px; letter-spacing: 0.18em; }
-  .foundation-text { font-size: 9px; }
-  .foundation-label { font-size: 7px; }
   .room-card-label { min-width: 130px; max-width: 130px; padding: 14px 12px; }
   .rcl-name { font-size: 12px; }
   .rcl-category { font-size: 7px; }
@@ -347,9 +339,13 @@ body.label-drag-mode .estate-hotspot-key { display: block; position: absolute; t
     <div class="page-hint">Click any place to explore</div>
   </div>
 
-  <div class="estate-frame">
-    <img class="estate-bg" src="assets/estate.png" alt="">
-    <div class="estate-hotspots" id="estate-hotspots"></div>
+  <div class="estate-section">
+    <div class="estate-stage" id="estate-stage">
+      <div class="estate-frame">
+        <img class="estate-bg" src="assets/estate.png" alt="">
+        <div class="estate-hotspots" id="estate-hotspots"></div>
+      </div>
+    </div>
   </div>
   <div class="estate-caption">
     <h2>The MV Estate</h2>
@@ -392,22 +388,53 @@ body.label-drag-mode .estate-hotspot-key { display: block; position: absolute; t
 <script src="rail-apply.js"></script>
 <script>
 (function(){
-  const stage = document.getElementById('house-stage');
-  const section = stage && stage.parentElement;
-  if(!stage || !section) return;
-  const DESIGN_W = 1500;
-  function fit(){
-    const avail = section.clientWidth;
-    const scale = Math.min(1, avail / DESIGN_W);
-    stage.style.transform = 'scale(' + scale + ')';
-    stage.style.height = (stage.scrollHeight * scale) + 'px';
+  // Both the House (1500px) and the Estate (1050px) are fixed-width designs
+  // scaled uniformly to fit their container. Scaling as one unit keeps every
+  // room/label perfectly proportioned at any width — no per-element breakpoints.
+  const STAGES = [
+    { id: 'house-stage',  design: 1500 },
+    { id: 'estate-stage', design: 1050 },
+  ].map(function(s){
+    const stage = document.getElementById(s.id);
+    return stage ? { stage: stage, section: stage.parentElement, design: s.design } : null;
+  }).filter(Boolean);
+  if(!STAGES.length) return;
+
+  function fitOne(t){
+    const avail = t.section.clientWidth;
+    if (avail <= 0) return;              // view hidden (display:none) — skip
+    const scale = Math.min(1, avail / t.design);
+    t.stage.style.transform = 'scale(' + scale + ')';
+    // Reset to auto first so scrollHeight reflects the TRUE content height
+    // (not a stale value from a previous pass), then lock the scaled height.
+    // Skip while content hasn't laid out yet (height 0) — a later pass fixes it.
+    t.stage.style.height = 'auto';
+    const naturalH = t.stage.scrollHeight;
+    if (naturalH > 0) t.stage.style.height = (naturalH * scale) + 'px';
   }
-  window.addEventListener('resize', fit);
-  // run after layout + after rooms render
-  requestAnimationFrame(fit);
-  setTimeout(fit, 50);
-  setTimeout(fit, 300);
-  setTimeout(fit, 800);
+  function fit(){ STAGES.forEach(fitOne); }
+  let raf = 0;
+  function schedule(){ cancelAnimationFrame(raf); raf = requestAnimationFrame(fit); }
+
+  // Re-fit on every event that can change layout AFTER first paint. This is
+  // what makes it reliable across browsers (Safari loads web fonts late, so a
+  // timeout-only approach leaves the diagram clipped there) and re-fits the
+  // Estate the moment its tab is shown (its section resizes from 0 → width).
+  window.addEventListener('resize', schedule);
+  window.addEventListener('load', schedule);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(schedule);
+  document.querySelectorAll('.house-bg, .estate-bg').forEach(function(img){
+    if (!img.complete) img.addEventListener('load', schedule);
+  });
+  if (window.ResizeObserver) {
+    const ro = new ResizeObserver(schedule);
+    STAGES.forEach(function(t){ try { ro.observe(t.section); } catch (e) {} });
+  }
+  document.querySelectorAll('.nav-tab').forEach(function(t){ t.addEventListener('click', schedule); });
+
+  schedule();
+  setTimeout(schedule, 100);
+  setTimeout(schedule, 400);
 })();
 </script>
 
